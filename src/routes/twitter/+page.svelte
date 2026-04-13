@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { authStore } from '$lib/stores/auth';
 	
 	const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 	
@@ -16,40 +17,51 @@
 		loading = true;
 		error = '';
 		videos = [];
+
+		if (!API_URL || API_URL === 'http://localhost:8000') {
+			// Check if backend is reachable
+		}
 		
 		try {
 			let response;
+			const token = $authStore.token || 'dev-token';
+			const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
 			const baseUrl = platform === 'youtube' ? `${API_URL}/api/youtube` : `${API_URL}/api/twitter`;
 			
 			if (platform === 'youtube') {
 				if (searchType === 'trending') {
-					response = await fetch(`${baseUrl}/trending?max_results=${maxResults}`);
+					response = await fetch(`${baseUrl}/trending?max_results=${maxResults}`, { headers });
 				} else if (searchType === 'query') {
-					response = await fetch(`${baseUrl}/search?query=${encodeURIComponent(searchQuery)}&max_results=${maxResults}`);
+					response = await fetch(`${baseUrl}/search?query=${encodeURIComponent(searchQuery)}&max_results=${maxResults}`, { headers });
 				} else if (searchType === 'channel') {
-					response = await fetch(`${baseUrl}/channel/${encodeURIComponent(searchQuery)}?max_results=${maxResults}`);
+					response = await fetch(`${baseUrl}/channel/${encodeURIComponent(searchQuery)}?max_results=${maxResults}`, { headers });
 				}
 			} else {
-				// Twitter logic
 				if (searchType === 'query') {
-					response = await fetch(`${baseUrl}/search?query=${encodeURIComponent(searchQuery)}&max_results=${maxResults}`);
+					response = await fetch(`${baseUrl}/search?query=${encodeURIComponent(searchQuery)}&max_results=${maxResults}`, { headers });
 				} else if (searchType === 'hashtag') {
-					response = await fetch(`${baseUrl}/hashtag/${encodeURIComponent(searchQuery)}?max_results=${maxResults}`);
+					response = await fetch(`${baseUrl}/hashtag/${encodeURIComponent(searchQuery)}?max_results=${maxResults}`, { headers });
 				} else if (searchType === 'user') {
-					response = await fetch(`${baseUrl}/user/${encodeURIComponent(searchQuery)}?max_results=${maxResults}`);
+					response = await fetch(`${baseUrl}/user/${encodeURIComponent(searchQuery)}?max_results=${maxResults}`, { headers });
 				}
 			}
 			
 			if (response && response.ok) {
 				const data = await response.json();
 				videos = data.videos || [];
-				console.log('Search results:', { count: videos.length, firstVideo: videos[0] });
+			} else if (response) {
+				const errData = await response.json().catch(() => ({}));
+				error = errData.detail || `Failed to fetch from ${platform === 'youtube' ? 'YouTube' : 'Twitter'} (${response.status})`;
 			} else {
-				error = `Failed to fetch videos from ${platform === 'youtube' ? 'YouTube' : 'Twitter'}`;
+				error = 'No response from server';
 			}
 		} catch (err: any) {
 			console.error('Search error:', err);
-			error = err.message || `Failed to search ${platform === 'youtube' ? 'YouTube' : 'Twitter'}`;
+			if (err.message === 'Failed to fetch') {
+				error = `Cannot reach backend server. Make sure VITE_API_URL is set correctly (currently: ${API_URL})`;
+			} else {
+				error = err.message || `Failed to search ${platform === 'youtube' ? 'YouTube' : 'Twitter'}`;
+			}
 		} finally {
 			loading = false;
 		}
@@ -57,7 +69,6 @@
 	
 	async function importVideo(videoId: string) {
 		if (!videoId) {
-			console.error('No video ID provided');
 			alert('Error: No video ID provided');
 			return;
 		}
@@ -66,28 +77,23 @@
 		importing = importing;
 		
 		try {
+			const token = $authStore.token || 'dev-token';
 			const baseUrl = platform === 'youtube' ? `${API_URL}/api/youtube` : `${API_URL}/api/twitter`;
 			const url = `${baseUrl}/import/${videoId}?auto_process=true`;
 			
-			console.log('Importing video:', { videoId, platform, url });
-			
 			const response = await fetch(url, {
-				method: 'POST'
+				method: 'POST',
+				headers: { Authorization: `Bearer ${token}` }
 			});
-			
-			console.log('Import response:', response.status, response.statusText);
 			
 			if (response.ok) {
 				const data = await response.json();
-				console.log('Import success:', data);
-				alert(`Video imported successfully! Video ID: ${data.video_id}\n\nThe video is being processed. Check the Videos page to see the status.`);
+				alert(`Video imported successfully! Video ID: ${data.video_id}\n\nCheck the Videos page for status.`);
 			} else {
 				const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
-				console.error('Import failed:', errorData);
 				alert(`Failed to import video: ${errorData.detail || 'Unknown error'}`);
 			}
 		} catch (err: any) {
-			console.error('Import error:', err);
 			alert(`Error importing video: ${err.message}`);
 		} finally {
 			importing.delete(videoId);
@@ -220,7 +226,12 @@
 	<!-- Error Message -->
 	{#if error}
 		<div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-8">
-			<p class="text-red-800">{error}</p>
+			<p class="text-red-800 font-medium">⚠️ {error}</p>
+			{#if error.includes('Cannot reach backend')}
+				<p class="text-red-600 text-sm mt-2">
+					Set the <code class="bg-red-100 px-1 rounded">VITE_API_URL</code> environment variable in your Vercel project settings to point to your deployed backend URL.
+				</p>
+			{/if}
 		</div>
 	{/if}
 	
