@@ -6,12 +6,23 @@ interface AuthState {
 	isAuthenticated: boolean;
 }
 
+// Initialise synchronously from localStorage so auth state is ready
+// before any component's onMount runs — prevents redirect-to-login race condition
+function loadInitialState(): AuthState {
+	if (typeof window !== 'undefined') {
+		const token = localStorage.getItem('auth_token');
+		const userStr = localStorage.getItem('user');
+		if (token && userStr) {
+			try {
+				return { token, user: JSON.parse(userStr), isAuthenticated: true };
+			} catch {}
+		}
+	}
+	return { token: null, user: null, isAuthenticated: false };
+}
+
 function createAuthStore() {
-	const { subscribe, set, update } = writable<AuthState>({
-		token: null,
-		user: null,
-		isAuthenticated: false
-	});
+	const { subscribe, set, update } = writable<AuthState>(loadInitialState());
 
 	return {
 		subscribe,
@@ -29,13 +40,15 @@ function createAuthStore() {
 				localStorage.removeItem('user');
 			}
 		},
+		// kept for backward compatibility — state is already loaded at construction
 		init: () => {
 			if (typeof window !== 'undefined') {
 				const token = localStorage.getItem('auth_token');
 				const userStr = localStorage.getItem('user');
 				if (token && userStr) {
-					const user = JSON.parse(userStr);
-					set({ token, user, isAuthenticated: true });
+					try {
+						set({ token, user: JSON.parse(userStr), isAuthenticated: true });
+					} catch {}
 				}
 			}
 		}
